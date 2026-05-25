@@ -10,14 +10,22 @@ function AuthGate() {
 
   useEffect(() => {
     if (loading) return
-    const inTabs = segments[0] === '(tabs)'
-    const inAuth = segments[0] === '(auth)'
+    const inTabs       = segments[0] === '(tabs)'
+    const inAuth       = segments[0] === '(auth)'
+    const atRoot       = segments.length === 0 || segments[0] === 'index'
 
+    // Authenticated: redirect away from auth/root screens into the app
+    if (user && (inAuth || atRoot)) {
+      router.replace('/(tabs)/home')
+      return
+    }
+
+    // Not authenticated: redirect out of protected tabs to login
     if (!user && inTabs) {
       router.replace('/(auth)/login')
-    } else if (user && (inAuth || segments[0] === undefined || segments.length === 0)) {
-      router.replace('/(tabs)/home')
     }
+
+    // Unauthenticated users stay on root welcome screen or onboarding — no redirect needed
   }, [user, loading, segments])
 
   return null
@@ -39,6 +47,7 @@ export default function RootLayout() {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="onboarding" />
+        <Stack.Screen name="+not-found" />
       </Stack>
     </AuthProvider>
   )

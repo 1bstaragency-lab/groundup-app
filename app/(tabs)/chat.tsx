@@ -21,26 +21,34 @@ const QUICK_PROMPTS = [
   'What should I post today?',
 ]
 
+const UP_CHAT_URL = 'https://groundupapp.com/.netlify/functions/up-chat'
+
 export default function ChatScreen() {
   const { user } = useAuth()
-  const [messages, setMessages] = useState<Message[]>([])
-  const [input,    setInput]    = useState('')
-  const [loading,  setLoading]  = useState(false)
-  const [fetching, setFetching] = useState(true)
+  const [messages,      setMessages]      = useState<Message[]>([])
+  const [input,         setInput]         = useState('')
+  const [loading,       setLoading]       = useState(false)
+  const [fetching,      setFetching]      = useState(true)
+  const [conversationId, setConversationId] = useState<string | null>(null)
   const flatRef = useRef<FlatList>(null)
 
-  // Load conversation history
+  // Load in-app conversation history (channel = null, i.e. app-originated)
   useEffect(() => {
     if (!user?.id) return
     supabase
       .from('up_conversations')
-      .select('id, role, content')
+      .select('id, role, content, conversation_id')
       .eq('user_id', user.id)
-      .eq('channel', 'imessage')
+      .is('channel', null)           // app conversations have no channel tag
       .order('created_at', { ascending: true })
       .limit(30)
       .then(({ data }) => {
-        setMessages((data ?? []) as Message[])
+        if (data && data.length > 0) {
+          setMessages(data.map(d => ({ id: d.id, role: d.role as 'user' | 'assistant', content: d.content })))
+          // Use the latest conversation_id to continue the thread
+          const last = data.filter(d => d.conversation_id).at(-1)
+          if (last?.conversation_id) setConversationId(last.conversation_id)
+        }
         setFetching(false)
       })
   }, [user?.id])
@@ -52,27 +60,34 @@ export default function ChatScreen() {
     setInput('')
     setLoading(true)
 
-    // Log user message
-    await supabase.from('up_conversations').insert({
-      user_id: user.id, role: 'user', content: userMsg.content, channel: 'imessage',
-    })
-
     try {
-      const res = await fetch('https://groundupapp.com/.netlify/functions/up-chat', {
+      const res = await fetch(UP_CHAT_URL, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, message: userMsg.content }),
+        body: JSON.stringify({
+          userId:         user.id,
+          message:        userMsg.content,
+          conversationId: conversationId ?? undefined,
+        }),
       })
       const data = await res.json()
-      const reply = data.reply ?? "I'm on it — let me get back to you on that."
-      const assistantMsg: Message = { id: (Date.now() + 1).toString(), role: 'assistant', content: reply }
+      const reply  = data.reply ?? "I'm on it — let me get back to you on that."
+      const convId = data.conversationId ?? null
+
+      if (convId && !conversationId) setConversationId(convId)
+
+      const assistantMsg: Message = {
+        id:      (Date.now() + 1).toString(),
+        role:    'assistant',
+        content: reply,
+      }
       setMessages(prev => [...prev, assistantMsg])
-      await supabase.from('up_conversations').insert({
-        user_id: user.id, role: 'assistant', content: reply, channel: 'imessage',
-      })
     } catch {
-      const err: Message = { id: (Date.now() + 1).toString(), role: 'assistant', content: "Couldn't reach uP — check your connection and try again." }
-      setMessages(prev => [...prev, err])
+      setMessages(prev => [...prev, {
+        id:      (Date.now() + 1).toString(),
+        role:    'assistant',
+        content: "Couldn't reach uP — check your connection and try again.",
+      }])
     } finally {
       setLoading(false)
     }
@@ -80,7 +95,7 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (messages.length > 0) {
-      setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 100)
+      setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 80)
     }
   }, [messages])
 
@@ -112,7 +127,6 @@ export default function ChatScreen() {
         <View style={s.onlineDot} />
       </View>
 
-      {/* Messages */}
       <KeyboardAvoidingView
         style={s.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -155,6 +169,7 @@ export default function ChatScreen() {
             multiline
             maxLength={500}
             returnKeyType="send"
+            blurOnSubmit
             onSubmitEditing={() => send(input)}
           />
           <TouchableOpacity
