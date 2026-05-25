@@ -1,0 +1,12 @@
+run = "npx expo start --tunnel"
+entrypoint = "app/index.tsx"
+
+[nix]
+channel = "stable-24_05"
+
+[deployment]
+run = ["sh", "-c", "npx expo start --tunnel"]
+
+[[ports]]
+localPort = 8081
+externalPort = 80
